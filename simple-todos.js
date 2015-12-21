@@ -1,21 +1,37 @@
 Tasks = new Mongo.Collection("tasks");
+Partitioner.partitionCollection(Tasks);
 
 if (Meteor.isServer) {
   // This code only runs on the server
   // Only publish tasks that are public or belong to the current user
   Meteor.publish("tasks", function () {
-    return Tasks.find({
-      $or: [
-        { private: {$ne: true} },
-        { owner: this.userId }
-      ]
-    });
+    return Tasks.find({});
+  });
+
+  Accounts.onCreateUser(function (options, user) {
+    var groupId = Random.id();
+    Partitioner.setUserGroup(user._id, groupId);
+    return user;
+  });
+
+  Meteor.methods({
+    updateOnlyThisPartitions: function (text) {
+      var group = Meteor.user().group;
+      console.log("UPDATING FOR GROUP", group);
+      Partitioner.bindGroup(group, function() {
+        var updated = Tasks.update({}, { $set: { text: "UPDATED" }}, { multi: true });
+        console.log("UPDATED", updated);
+      });
+    },
   });
 }
 
 if (Meteor.isClient) {
   // This code only runs on the client
-  Meteor.subscribe("tasks");
+  Tracker.autorun(function() {
+    var group = Partitioner.group();
+    Meteor.subscribe("tasks", group);
+  });
 
   Template.body.helpers({
     tasks: function () {
@@ -48,6 +64,11 @@ if (Meteor.isClient) {
 
       // Clear form
       event.target.text.value = "";
+    },
+    "click .update": function (event) {
+      event.preventDefault();
+
+      Meteor.call("updateOnlyThisPartitions");
     },
     "change .hide-completed input": function (event) {
       Session.set("hideCompleted", event.target.checked);
